@@ -40,21 +40,67 @@ class Renderer {
     
     //
     moveLeft() {
+        let view = this.scene.view;
+        let n = view.prp.subtract(view.srp);
+        n.normalize();
+        let u = view.vup.cross(n);
+        u.normalize();
+
+        view.prp = view.prp.add(u);
+        view.srp = view.srp.add(u);
+        if (this.enable_animation === false) {
+            this.draw();
+        }
+
 
     }
     
     //
     moveRight() {
+        let view = this.scene.view;
+        let n = view.prp.subtract(view.srp);
+        n.normalize();
+        let u = view.vup.cross(n);
+        u.normalize();
+
+        view.prp = view.prp.add(u);
+        view.srp = view.srp.add(u);
+        if (this.enable_animation === false) {
+            this.draw();
+        }
 
     }
     
     //
     moveBackward() {
+        let view = this.scene.view;
+        let n = view.prp.subtract(view.srp);
+        n.normalize();
+        let u = view.vup.cross(n);
+        u.normalize();
+
+        view.prp = view.prp.add(n);
+        view.srp = view.srp.add(n);
+        if (this.enable_animation === false) {
+            this.draw();
+        }
 
     }
     
     //
     moveForward() {
+        let view = this.scene.view;
+        let n = view.prp.subtract(view.srp);
+        n.normalize();
+        let u = view.vup.cross(n);
+        u.normalize();
+        n.scale(-1);
+
+        view.prp = view.prp.add(n);
+        view.srp = view.srp.add(n);
+        if (this.enable_animation === false) {
+            this.draw();
+        }
 
     }
 
@@ -112,6 +158,112 @@ class Renderer {
         
         // TODO: implement clipping here!
         
+        let w0 = line.pt0.w;
+        let w1 = line.pt1.w
+        let sameSide = false;
+        
+        if (p0.x < p0.z - FLOAT_EPSILON && p1.x < p1.z - FLOAT_EPSILON) {
+            sameSide = true;
+        }
+        if (p0.x > -p0.z + FLOAT_EPSILON && p1.x > -p1.z + FLOAT_EPSILON) {
+            sameSide = true;
+        }
+        if (p0.y < p0.z - FLOAT_EPSILON && p1.y < p1.z - FLOAT_EPSILON) {
+            sameSide = true;
+        }
+        if (p0.y > -p0.z + FLOAT_EPSILON && p1.y > -p1.z + FLOAT_EPSILON) {
+            sameSide = true;
+        }
+        if (p0.z < -1 - FLOAT_EPSILON && p1.z < -1 - FLOAT_EPSILON) {
+            sameSide = true;
+        }
+        if (p0.z > z_min + FLOAT_EPSILON && p1.z > z_min + FLOAT_EPSILON) {
+            sameSide = true;
+        }
+
+        if (out0 === 0 && out1 === 0) {
+            result = {
+                pt0: CG.Vector4(p0.x, p0.y, p0.z, w0),
+                pt1: CG.Vector4(p1.x, p1.y, p1.z, w1)
+
+            };
+        }
+        else if (sameSide === true) {
+            result = null;
+        }
+        else {
+            let useP0 = (out0 != 0);
+            let pt = p1;
+            if (useP0) {
+                pt = p0;
+            }
+
+            let x0 = p0.x;
+            let y0 = p0.y;
+            let z0 = p0.z;
+            let dx = p1.x - p0.x;
+            let dy = p1.y - p0.y;
+            let dz = p1.z - p0.z;
+
+            let t = 0;
+            let denominator = 1;
+            // intersection t value
+            // left
+            if (pt.x < pt.z - FLOAT_EPSILON) {
+                denominator = dx - dz;
+                t = (-x0 + z0) / denominator;
+            }
+            // right
+            else if (pt.x > -pt.z + FLOAT_EPSILON) {
+                denominator = -dx - dz;
+                t = (x0 + z0) / denominator;
+            }
+
+            // bottom
+            else if (pt.y < pt.z - FLOAT_EPSILON) {
+                denominator = dy - dz;
+                t = (-y0 + z0) / denominator;
+            }
+            // top
+            else if (pt.y > -pt.z + FLOAT_EPSILON) {
+                denominator = -dy - dz;
+                t = (y0 + z0) / denominator;
+            }
+            // far
+            else if (pt.z < -1 - FLOAT_EPSILON) {
+                denominator = dz;
+                t = (-z0 - 1) / denominator;
+            }
+            // near 
+            else {
+                denominator = -dz;
+                t = (z0 - z_min) / denominator;
+            }
+
+            if (Math.abs(denominator) > FLOAT_EPSILON) {
+                let newX = x0 + t * dx;
+                let newY = y0 + t * dy;
+                let newZ = z0 + t * dz;
+                let newW = w0 + t * (w1 - w0);
+
+                if (useP0) {
+                    let newLine = {
+                        pt0: CG.Vector4(newX, newY, newZ, newW),
+                        pt1: CG.Vector4(p1.x, p1.y, p1.z, w1)
+                    };
+                    result = this.clipLinePerspective(newLine, z_min);
+                }
+                else {
+                    let newLine = {
+                        pt0: CG.Vector4(p0.x, p0.y, p0.z, w0),
+                        pt1: CG.Vector4(newX, newY, newZ, newW)
+                    };
+                    result = this.clipLinePerspective(newLine, z_min);
+                }
+
+            }
+        }
+
         return result;
     }
 
