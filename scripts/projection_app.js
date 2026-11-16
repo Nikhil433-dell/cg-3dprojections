@@ -52,10 +52,10 @@ let app = createApp({
 
 let initial_scene = {
     view: {
-        prp: [44, 20, -16],
-        srp: [20, 20, -40],
+        prp: [10, 10, 20],
+        srp: [10, 10, -45],
         vup: [0, 1, 0],
-        clip: [-19, 5, -10, 8, 12, 100]
+        clip: [-24, 24, -18, 18, 1, 150]
     },
     models: [
         {
