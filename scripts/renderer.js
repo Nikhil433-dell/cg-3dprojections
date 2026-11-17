@@ -18,7 +18,7 @@ class Renderer {
         this.canvas.height = canvas.height;
         this.ctx = this.canvas.getContext('2d');
         this.scene = this.processScene(scene);
-        this.enable_animation = false;  // <-- disabled for easier debugging; enable for animation
+        this.enable_animation = true;  // <-- disabled for easier debugging; enable for animation
         this.start_time = null;
         this.prev_time = null;
     }
@@ -26,16 +26,124 @@ class Renderer {
     //
     updateTransforms(time, delta_time) {
         // TODO: update any transformations needed for animation
+
+        const seconds = time / 1000;
+
+        for (const model of this.scene.models) {
+            
+            if (!model.animation) {
+                continue;
+            }
+
+            // center for the Generated shapes
+            let center = model.center;
+            
+            if (!center) {
+                if (!model.vertices || model.vertices.length === 0) {
+                    continue;
+                }
+
+                if (!model.rotationCenter) {
+                    let minX = Infinity, minY = Infinity, minZ = Infinity;
+                    let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+
+                    for (const vertex of model.vertices) {
+                        minX = Math.min(minX, vertex.x);
+                        minY = Math.min(minY, vertex.y);
+                        minZ = Math.min(minZ, vertex.z);
+
+                        maxX = Math.max(maxX, vertex.x);
+                        maxY = Math.max(maxY, vertex.y);
+                        maxZ = Math.max(maxZ, vertex.z);
+                    }
+
+                    model.rotationCenter = CG.Vector3(
+                        (minX + maxX) / 2,
+                        (minY + maxY) / 2,
+                        (minZ + maxZ) / 2
+                    );
+                }
+
+                center = model.rotationCenter;
+            }
+
+            const angle = 2 * Math.PI * model.animation.rps * seconds;
+
+            const rotation = new Matrix(4, 4);
+
+            if (model.animation.axis === "x") {
+                CG.mat4x4RotateX(rotation, angle);
+            } else if (model.animation.axis === "y") {
+                CG.mat4x4RotateY(rotation, angle);
+            } else if (model.animation.axis === "z") {
+                CG.mat4x4RotateZ(rotation, angle);
+            } else {
+                continue;
+            }
+
+            const toOrigin = new Matrix(4, 4);
+            CG.mat4x4Translate(
+                toOrigin,
+                -center.x,
+                -center.y,
+                -center.z
+            );
+
+            const moveBack = new Matrix(4, 4);
+            CG.mat4x4Translate(
+                moveBack,
+                center.x,
+                center.y,
+                center.z
+            );
+
+            model.matrix = Matrix.multiply([
+                moveBack,
+                rotation,
+                toOrigin
+            ]);
+        }
+
+    }
+
+    // Rotate the viewing direction about the camera's v-axis
+    rotateCamera(theta) {
+        const view = this.scene.view;
+        const n = view.prp.subtract(view.srp);
+        n.normalize();
+        const u = view.vup.cross(n);
+        u.normalize();
+        const v = n.cross(u);
+        v.normalize();
+
+        const direction = view.srp.subtract(view.prp);
+        const cross = v.cross(direction);
+        const dot = v.dot(direction);
+        const c = Math.cos(theta);
+        const s = Math.sin(theta);
+
+        const rotated = CG.Vector3(
+            direction.x * c + cross.x * s + v.x * dot * (1 - c),
+            direction.y * c + cross.y * s + v.y * dot * (1 - c),
+            direction.z * c + cross.z * s + v.z * dot * (1 - c)
+        );
+        view.srp = view.prp.add(rotated);
+        
+        view.vup = v;
+
+        if (!this.enable_animation) {
+            this.draw();
+        }
     }
 
     //
     rotateLeft() {
-
+        this.rotateCamera(5 * Math.PI / 180);
     }
     
     //
     rotateRight() {
-
+        this.rotateCamera(-5 * Math.PI / 180);
     }
     
     //
@@ -46,12 +154,12 @@ class Renderer {
         let u = view.vup.cross(n);
         u.normalize();
 
-        view.prp = view.prp.add(u);
-        view.srp = view.srp.add(u);
+
+        view.prp = view.prp.subtract(u);
+        view.srp = view.srp.subtract(u);
         if (this.enable_animation === false) {
             this.draw();
         }
-
 
     }
     
@@ -108,55 +216,60 @@ class Renderer {
     draw() {
         this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
 
-        // TODO: implement drawing here!
-        // For each model
-        //   * For each vertex
-        //     * transform endpoints to canonical view volume
-        //   * For each line segment in each edge
-        //     * clip in 3D
-        //     * project to 2D
-        //     * translate/scale to viewport (i.e. window)
-        //     * draw line
-        let view = this.scene.view;
-        let z_min = -view.clip[4] / view.clip[5];
-        let transform = CG.mat4x4Perspective(view.prp, view.srp, view.vup, view.clip);
-        let mper = CG.mat4x4MPer();
-        let viewport = CG.mat4x4Viewport(this.canvas.width, this.canvas.height);
+        const view = this.scene.view;
+        const normalization = CG.mat4x4Perspective(
+            view.prp, view.srp, view.vup, view.clip
+        );
+        const projection = CG.mat4x4MPer();
+        const viewport = CG.mat4x4Viewport(this.canvas.width, this.canvas.height);
+        const zMin = -view.clip[4] / view.clip[5];
 
-        for (let i = 0; i < this.scene.models.length; i++) {
-            let model = this.scene.models[i];
-
-            let transformed = [];
-            for (let j = 0; j < model.vertices.length; j++) {
-                let vertex = Matrix.multiply([transform, model.matrix, model.vertices[j]]);
-                transformed.push(vertex);
+        const projectToScreen = (point) => {
+            const projected = Matrix.multiply([projection, point]);
+            if (!Number.isFinite(projected.w) || projected.w <= 0) {
+                return null;
             }
+            const divided = CG.Vector4(
+                projected.x / projected.w,
+                projected.y / projected.w,
+                projected.z / projected.w,
+                1
+            );
+            const screen = Matrix.multiply([viewport, divided]);
+            return Number.isFinite(screen.x) && Number.isFinite(screen.y)
+                ? screen : null;
+        };
 
-            for (let j = 0; j < model.edges.length; j++) {
-                let edge = model.edge[j];
-                for (let k = 0; k < edges.length - 1; k++) {
-                    let line = {
-                        pt0: transformed[edge[k]],
-                        pt1: transformed[edge[k + 1]]
-                    };
-                    let clipped = this.clipLinePerspective(line, z_min);
+        for (const model of this.scene.models) {
+            // Parametric shapes must have their vertices and edges generated first
+            if (!model.vertices || !model.edges) {
+                continue;
+            }
+            const transform = Matrix.multiply([normalization, model.matrix]);
+            const vertices = model.vertices.map((vertex) =>
+                Matrix.multiply([transform, vertex])
+            );
 
-                    if (clipped !== null) {
-                        let point0 = Matrix.multiply([viewport, mper, clipped.pt0]);
-                        let point1 = Matrix.multiply([viewport, mper, clipped.pt1]);
-                        let x0 = point0.x / point0.w;
-                        let y0 = point0.y / point0.w;
-                        let x1 = point1.x / point0.w;
-                        let y1 = point1.y / point0.w;
-
-                        this.drawLine(x0, y0, x1, y1);
-
+            for (const edge of model.edges) {
+                // An edge list is a polyline: [0,1,2] means segments 0-1 and 1-2
+                for (let i = 0; i < edge.length - 1; i++) {
+                    const clipped = this.clipLinePerspective({
+                        pt0: vertices[edge[i]],
+                        pt1: vertices[edge[i + 1]]
+                    }, zMin);
+                    if (clipped === null) {
+                        continue;
+                    }
+                    const start = projectToScreen(clipped.pt0);
+                    const end = projectToScreen(clipped.pt1);
+                    if (start !== null && end !== null) {
+                        this.drawLine(start.x, start.y, end.x, end.y);
                     }
                 }
             }
         }
 
-
+        
     }
 
     // Get outcode for a vertex
@@ -191,8 +304,8 @@ class Renderer {
     // z_min:        float (near clipping plane in canonical view volume)
     clipLinePerspective(line, z_min) {
         let result = null;
-        let p0 = Vector3(line.pt0.x, line.pt0.y, line.pt0.z); 
-        let p1 = Vector3(line.pt1.x, line.pt1.y, line.pt1.z);
+        let p0 = CG.Vector3(line.pt0.x, line.pt0.y, line.pt0.z); 
+        let p1 = CG.Vector3(line.pt1.x, line.pt1.y, line.pt1.z);
         let out0 = this.outcodePerspective(p0, z_min);
         let out1 = this.outcodePerspective(p1, z_min);
         
